@@ -1,0 +1,401 @@
+import pygame
+import random
+import math
+
+pygame.init()
+
+# Constants
+FPS = 60
+WIDTH, HEIGHT = 600, 600
+ROWS, COLS = 4, 4
+RECT_HEIGHT = HEIGHT // ROWS
+RECT_WIDTH = WIDTH // COLS
+OUTLINE_COLOR = (187, 173, 160)
+OUTLINE_THICKNESS = 10
+BACKGROUND_COLOR = (205, 192, 180)
+FONT_COLOR = (255, 255, 255)
+TITLE_FONT = pygame.font.SysFont("calibri", 60, bold=True)
+FONT = pygame.font.SysFont("calibri", 40, bold=True)
+SMALL_FONT = pygame.font.SysFont("calibri", 22, bold=False)
+TILE_SPEED = 50
+DARK_YELLOW = (255, 179, 0)  
+
+# Main menu colors
+START_COLOR = (255, 195, 59)  #Yellow
+TUTORIAL_COLOR = (255, 110, 58)  #Orange
+BACKGROUND_MAIN_COLOR = (164, 1, 34)  #DarkRed
+
+# Window setup
+WINDOW = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("2048")
+
+
+# Tile Class
+class Tile:
+    COLORS = [
+        (255, 195, 59), (255, 110, 58), (226, 1, 52),
+        (164, 1, 34), (255, 178, 253), (0, 141, 249),
+        (132, 0, 205), (0, 252, 207), (255, 90, 175),
+        (0, 159, 129), (159, 1, 98)
+    ]
+
+    def __init__(self, value, row, col):
+        self.value = value
+        self.row = row
+        self.col = col
+        self.x = col * RECT_WIDTH + RECT_WIDTH // 2
+        self.y = row * RECT_HEIGHT + RECT_HEIGHT // 2
+        self.target_x = self.x
+        self.target_y = self.y
+
+    def update_position(self):
+        self.target_x = self.col * RECT_WIDTH + RECT_WIDTH // 2
+        self.target_y = self.row * RECT_HEIGHT + RECT_HEIGHT // 2
+
+    def animate(self):
+        if self.x < self.target_x:
+            self.x = min(self.x + TILE_SPEED, self.target_x)
+        elif self.x > self.target_x:
+            self.x = max(self.x - TILE_SPEED, self.target_x)
+
+        if self.y < self.target_y:
+            self.y = min(self.y + TILE_SPEED, self.target_y)
+        elif self.y > self.target_y:
+            self.y = max(self.y - TILE_SPEED, self.target_y)
+
+    def get_color(self):
+        color_index = int(math.log2(self.value)) - 1
+        if color_index >= len(self.COLORS):
+            return 0, 0, 0
+        return self.COLORS[color_index]
+
+    def draw(self, window):
+        if self.value <= 0 or not math.isfinite(self.value):
+            return
+        color = self.get_color()
+        pygame.draw.rect(
+            window, color,
+            (self.x - RECT_WIDTH // 2, self.y - RECT_HEIGHT // 2,
+             RECT_WIDTH, RECT_HEIGHT),
+            border_radius=10
+        )
+        text = TITLE_FONT.render(str(self.value), True, FONT_COLOR)
+        window.blit(
+            text,
+            (self.x - text.get_width() // 2,
+             self.y - text.get_height() // 2)
+        )
+
+
+# Grid and Display
+def draw_grid(window):
+    for row in range(1, ROWS):
+        y = row * RECT_HEIGHT
+        pygame.draw.line(
+            window, OUTLINE_COLOR, (0, y), (WIDTH, y), OUTLINE_THICKNESS
+        )
+    for col in range(1, COLS):
+        x = col * RECT_WIDTH
+        pygame.draw.line(
+            window, OUTLINE_COLOR, (x, 0), (x, HEIGHT), OUTLINE_THICKNESS
+        )
+
+
+def draw(window, tiles, lose, win):
+    window.fill(BACKGROUND_COLOR)
+    for tile in tiles.values():
+        tile.draw(window)
+    draw_grid(window)
+
+    if win:
+        win_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        win_surface.fill((0, 255, 0, 128))  # Green background
+        window.blit(win_surface, (0, 0))
+        win_text = TITLE_FONT.render("You Win! >_<", True, FONT_COLOR)
+        window.blit(
+            win_text,
+            (WIDTH // 2 - win_text.get_width() // 2,
+             HEIGHT // 2 - win_text.get_height() // 2)
+        )
+    elif lose:
+        lose_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        lose_surface.fill((255, 0, 0, 128))
+        window.blit(lose_surface, (0, 0))
+        lose_text = TITLE_FONT.render("You lose.. T_T", True, FONT_COLOR)
+        window.blit(
+            lose_text,
+            (WIDTH // 2 - lose_text.get_width() // 2,
+             HEIGHT // 2 - lose_text.get_height() // 2)
+        )
+
+    pygame.display.update()
+
+
+# Game Logic
+def get_random_pos(tiles):
+    while True:
+        row = random.randrange(ROWS)
+        col = random.randrange(COLS)
+        if f"{row}{col}" not in tiles:
+            return row, col
+
+
+def can_merge(tiles):
+    for tile in tiles.values():
+        for dr, dc in [(0, 1), (1, 0)]:
+            neighbor = tiles.get(f"{tile.row + dr}{tile.col + dc}")
+            if neighbor and neighbor.value == tile.value:
+                return True
+    return False
+
+
+def can_move(tiles):
+    return len(tiles) < ROWS * COLS or can_merge(tiles)
+
+
+def move_tiles(tiles, direction):
+    moved = False
+    merged = set()
+    order = sorted(
+        tiles.values(),
+        key=lambda t: (t.row, t.col) if direction in ("UP", "DOWN")
+        else (t.col, t.row),
+        reverse=(direction in ("DOWN", "RIGHT"))
+    )
+    for tile in order:
+        while True:
+            old_pos = (tile.row, tile.col)
+            if direction == "UP" and tile.row > 0:
+                target = tiles.get(f"{tile.row - 1}{tile.col}")
+            elif direction == "DOWN" and tile.row < ROWS - 1:
+                target = tiles.get(f"{tile.row + 1}{tile.col}")
+            elif direction == "LEFT" and tile.col > 0:
+                target = tiles.get(f"{tile.row}{tile.col - 1}")
+            elif direction == "RIGHT" and tile.col < COLS - 1:
+                target = tiles.get(f"{tile.row}{tile.col + 1}")
+            else:
+                break
+
+            if not target:
+                tile.row, tile.col = (
+                    tile.row - 1 if direction == "UP" else
+                    tile.row + 1 if direction == "DOWN" else tile.row,
+                    tile.col - 1 if direction == "LEFT" else
+                    tile.col + 1 if direction == "RIGHT" else tile.col
+                )
+                moved = True
+            elif target.value == tile.value and target not in merged:
+                target.value *= 2
+                merged.add(target)
+                tiles.pop(f"{tile.row}{tile.col}", None)
+                moved = True
+                break
+            else:
+                break
+            tiles[f"{tile.row}{tile.col}"] = tile
+            tiles.pop(f"{old_pos[0]}{old_pos[1]}", None)
+    for tile in tiles.values():
+        tile.update_position()
+    return moved
+
+
+# Tutorial Pages
+def show_tutorial_window():
+    running = True
+    while running:
+        WINDOW.fill((164, 1, 34)) 
+        tutorial_text = FONT.render("Introduction", True, FONT_COLOR)
+        WINDOW.blit(
+            tutorial_text,
+            (30, 30)
+        )
+        
+        intro_lines = [
+            "In 2014, the world was introduced to 2048 a game so simple",
+            "yet captivating, it became a global sensation overnight.",
+            "But as millions enjoyed its challenges, one question remained",
+            " ",
+            "Could we make it better for everyone?",
+            " ",
+            "Enter MergeVision, a groundbreaking reimagining of the,",
+            "classic, built specifically for colorblind players and those",
+            "seeking a fresh perspective.",
+            " ",
+            "In MergeVison, numbers give way to dynamic shapes and",
+            "patterns, ensuring inclusivity without sacrificing the fun.",
+            "It's not just a game—it's a step forward in designing",
+            "experiences that everyone can enjoy. Are you ready to see",
+            "the puzzle world through a new lens? Join us, and let's",
+            "reshape how we play,together!"
+        ]
+        
+        # Display each line of text
+        y_offset = HEIGHT // 3 - (len(intro_lines) * 15) // 2  # Adjust vertical centering
+        for line in intro_lines: 
+            line_text = SMALL_FONT.render(line, True, FONT_COLOR)
+            WINDOW.blit(
+                line_text,
+                (30, y_offset)
+            )
+            y_offset += 30 
+            
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                running = False  # Close window on click
+        pygame.display.update()
+
+
+def show_tutorial_window2():
+    running = True
+    while running:
+        WINDOW.fill((164, 1, 34)) 
+        tutorial_text = FONT.render("How to Play", True, FONT_COLOR)
+        WINDOW.blit(
+            tutorial_text,
+            (30, 20)
+        )
+        
+        intro_lines = [
+            "1. Shown a 4 by 4 grid which can be spawn with any number.",
+            "    Initially two random cells are filled with 2 in it. Rest cells",
+            "    are empty.",
+            "2. You have to press any one of four keys to move up, down,",
+            "    left, or right. When you press any key, the elements of the",
+            "    cell move in that direction.",
+            "3. If any two identical numbers are contained in that particular",
+            "    row (in case of moving left or right) or column (in case of",
+            "    moving up and down) they get add up and extreme cell in",
+            "    that direction fill itself with that number and rest cells",
+            "    goes empty again.",
+            "4. After this grid compression any random empty cell gets",
+            "    itself filled with 2. You have to double the elements by",
+            "    adding up and make 2048 in any of the cell. If we are able",
+            "    to do that you wins.",
+            "5. But if during the game there is no empty cell left to be filled",
+            "    with a new 2, then the game goes over."
+        ]
+        
+        # Display each line of text
+        y_offset = HEIGHT // 3 - (len(intro_lines) * 15) // 2  # Adjust vertical centering
+        for line in intro_lines: 
+            line_text = SMALL_FONT.render(line, True, FONT_COLOR)
+            WINDOW.blit(
+                line_text,
+                (30, y_offset)
+            )
+            y_offset += 30 
+            
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                running = False  # Close window on click
+        pygame.display.update()
+
+
+# Main Menu
+def main_menu():
+    running = True
+    while running:
+        WINDOW.fill(BACKGROUND_MAIN_COLOR)
+        title = TITLE_FONT.render("2048", True, FONT_COLOR)
+        WINDOW.blit(
+            title,
+            (WIDTH // 2 - title.get_width() // 2,
+             HEIGHT // 2 - title.get_height() - 90)
+        )
+        
+        # Tagline
+        tagline = FONT.render("Merge Vision", True, FONT_COLOR)
+        WINDOW.blit(
+            tagline,
+            (WIDTH // 2 - tagline.get_width() // 2,
+             HEIGHT // 2 - title.get_height() - 10)  # Adjust the Y position as needed
+        )
+
+        # Buttons
+        start_button = pygame.Rect(WIDTH // 4, HEIGHT // 2 + 50, WIDTH // 2, 70)
+        tutorial_button = pygame.Rect(WIDTH // 4, HEIGHT // 2 + 150, WIDTH // 2, 70)
+
+        pygame.draw.rect(WINDOW, START_COLOR, start_button, border_radius=10)
+        pygame.draw.rect(WINDOW, TUTORIAL_COLOR, tutorial_button, border_radius=10)
+
+        start_text = FONT.render("Start", True, FONT_COLOR)
+        tutorial_text = FONT.render("Tutorial", True, FONT_COLOR)
+
+        WINDOW.blit(
+            start_text,
+            (start_button.centerx - start_text.get_width() // 2,
+             start_button.centery - start_text.get_height() // 2)
+        )
+        WINDOW.blit(
+            tutorial_text,
+            (tutorial_button.centerx - tutorial_text.get_width() // 2,
+             tutorial_button.centery - tutorial_text.get_height() // 2)
+        )
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if start_button.collidepoint(event.pos):
+                    return  # Start the game
+                elif tutorial_button.collidepoint(event.pos):
+                    show_tutorial_window()
+                    show_tutorial_window2()
+                    return  # After tutorial, start the game directly
+
+        pygame.display.update()
+
+# Main Game
+def main():
+    tiles = {}
+    for _ in range(2):  # Start with 2 tiles
+        row, col = get_random_pos(tiles)
+        tiles[f"{row}{col}"] = Tile(2, row, col)
+
+    clock = pygame.time.Clock()
+    running = True
+    win = lose = False
+
+    while running:
+        clock.tick(FPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                if lose or win:
+                    continue
+                direction = None
+                if event.key == pygame.K_UP:
+                    direction = "UP"
+                elif event.key == pygame.K_DOWN:
+                    direction = "DOWN"
+                elif event.key == pygame.K_LEFT:
+                    direction = "LEFT"
+                elif event.key == pygame.K_RIGHT:
+                    direction = "RIGHT"
+
+                if direction and move_tiles(tiles, direction):
+                    row, col = get_random_pos(tiles)
+                    tiles[f"{row}{col}"] = Tile(2, row, col)
+                    if any(tile.value == 2048 for tile in tiles.values()):
+                        win = True
+                    if not can_move(tiles):
+                        lose = True
+
+        for tile in tiles.values():
+            tile.animate()
+
+        draw(WINDOW, tiles, lose, win)
+
+
+if __name__ == "__main__":
+    main_menu()
+    main()
